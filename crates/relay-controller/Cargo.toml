@@ -1,5 +1,5 @@
 [package]
-name = "esp-test"
+name = "relay-controller"
 version = "0.1.0"
 authors = ["Justin Rubek <25621857+justinrubek@users.noreply.github.com>"]
 edition = "2021"
@@ -7,7 +7,7 @@ resolver = "2"
 rust-version = "1.77"
 
 [[bin]]
-name = "esp-test"
+name = "relay-controller"
 harness = false # do not use the built in cargo test harness -> resolve rust-analyzer errors
 
 [profile.release]
