@@ -3,13 +3,20 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.dependencies]
+axum = "0.8.4"
+embedded-hal = "1"
+embedded-svc = { version = "0.28", features = ["experimental"] }
+esp-idf-hal = "0.45"
+esp-idf-svc = { version = "0.51", features = ["alloc", "experimental"] }
+esp-idf-sys = { version = "0.36.1", features = ["binstart"] }
 # reqwest = { version = "0.11.12", features = ["rustls-tls"] }
+serde_json = "1"
 # serde = { version = "1", features = ["derive"] }
-# serde_json = "1"
 thiserror = "1"
-# tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+log = "0.4"
 
 [workspace.lints.clippy.pedantic]
 level = "warn"
@@ -24,4 +31,13 @@ repository = "https://github.com/justinrubek/templates"
 version = "0.1.0"
 
 [profile.release]
-# opt-level = 2 # fast and small wasm
+debug = false
+opt-level = "s"
+#lto = "fat"
+strip = true
+panic = "abort"
+
+[profile.dev]
+debug = true
+opt-level = 2
+lto = "off"

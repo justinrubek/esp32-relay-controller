@@ -34,15 +34,6 @@
     deps-only = craneLib.buildDepsOnly ({} // common-build-args);
 
     packages = {
-      default = packages.cli;
-      cli = craneLib.buildPackage ({
-          pname = "cli";
-          cargoArtifacts = deps-only;
-          cargoExtraArgs = "--bin cli";
-          meta.mainProgram = "cli";
-        }
-        // common-build-args);
-
       cargo-doc = craneLib.cargoDoc ({
           cargoArtifacts = deps-only;
         }
@@ -68,17 +59,8 @@
         }
         // common-build-args);
     };
-  in rec {
+  in {
     inherit packages checks;
-
-    apps = {
-      cli = {
-        type = "app";
-        program = pkgs.lib.getBin self'.packages.cli;
-      };
-      default = apps.cli;
-    };
-
     legacyPackages = {
       cargoExtraPackages = extraPackages;
     };
