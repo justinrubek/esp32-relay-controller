@@ -3,6 +3,7 @@ use crate::relay::RelayController;
 use crate::wifi::WifiState;
 use axum::{
     extract::{Path, State},
+    response::IntoResponse,
     routing::*,
     Json, Router,
 };
@@ -37,6 +38,7 @@ pub async fn run_server(
         .route("/", get(move || async { "Hello!" }))
         .route("/relays", get(get_all_relays))
         .route("/relays/{id}", get(get_relay_state).put(set_relay_state))
+        .fallback(not_found)
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -109,4 +111,8 @@ async fn set_relay_state(
             "error": "Invalid relay ID or failed to set state"
         })),
     }
+}
+
+async fn not_found() -> impl IntoResponse {
+    (axum::http::StatusCode::NOT_FOUND, "not found")
 }
