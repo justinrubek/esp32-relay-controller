@@ -1,37 +1,37 @@
 use esp_idf_hal::{
-    gpio::{Gpio4, Gpio5, Output, PinDriver},
+    gpio::{Output, PinDriver},
     sys::EspError,
 };
+use esp_idf_svc::hal::gpio::AnyIOPin;
 use log::{debug, info};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
 
-type Relay0Pin = PinDriver<'static, Gpio4, Output>;
-type Relay1Pin = PinDriver<'static, Gpio5, Output>;
+type Driver = PinDriver<'static, AnyIOPin, Output>;
 
 /// Controls relay states through GPIO pins
 pub struct RelayController {
-    relay0: Arc<Mutex<Option<Relay0Pin>>>,
-    relay1: Arc<Mutex<Option<Relay1Pin>>>,
+    relay0: Arc<Mutex<Option<Driver>>>,
+    relay1: Arc<Mutex<Option<Driver>>>,
     states: Arc<[AtomicBool; 2]>,
 }
 
 impl RelayController {
     /// Creates a new relay controller with the specified pins
-    pub fn new(gpio4: Gpio4, gpio5: Gpio5) -> Result<Self, EspError> {
+    pub fn new(pin0: AnyIOPin, pin1: AnyIOPin) -> Result<Self, EspError> {
         // Create pin drivers
-        let mut relay0 = PinDriver::output(gpio4)?;
-        let mut relay1 = PinDriver::output(gpio5)?;
+        let mut relay0 = PinDriver::output(pin0)?;
+        let mut relay1 = PinDriver::output(pin1)?;
 
         // Initialize as off
         relay0.set_low()?;
         relay1.set_low()?;
 
         // To make them 'static, we need to leak them
-        let relay0: Relay0Pin = unsafe { std::mem::transmute(relay0) };
-        let relay1: Relay1Pin = unsafe { std::mem::transmute(relay1) };
+        let relay0: Driver = unsafe { std::mem::transmute(relay0) };
+        let relay1: Driver = unsafe { std::mem::transmute(relay1) };
 
         let controller = Self {
             relay0: Arc::new(Mutex::new(Some(relay0))),
