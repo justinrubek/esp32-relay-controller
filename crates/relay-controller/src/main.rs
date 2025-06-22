@@ -1,13 +1,15 @@
-use crate::{config::Config, error::Result};
-use esp_idf_svc::{
-    eventloop::EspSystemEventLoop, hal::prelude::Peripherals, nvs, timer::EspTaskTimerService,
-};
+use std::sync::Arc;
+
+use crate::{config::Config, error::Result, relay::RelayController};
+use esp_idf_hal::prelude::Peripherals;
+use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs, timer::EspTaskTimerService};
 use log::{error, info};
 use server::run_server;
 use wifi::WifiConnection;
 
 mod config;
 mod error;
+mod relay;
 mod server;
 mod wifi;
 
@@ -58,6 +60,9 @@ async fn async_main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let peripherals = Peripherals::take()?;
     let nvs_default_partition = nvs::EspDefaultNvsPartition::take()?;
 
+    let relay_controller = RelayController::new(peripherals.pins.gpio4, peripherals.pins.gpio5)?;
+    let relay_controller = Arc::new(relay_controller);
+
     // initialize network before starting the server
     let mut wifi_connection = WifiConnection::new(
         peripherals.modem,
@@ -69,7 +74,7 @@ async fn async_main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     .await?;
 
     tokio::try_join!(
-        run_server(wifi_connection.state.clone()),
+        run_server(wifi_connection.state.clone(), relay_controller),
         wifi_connection.connect()
     )?;
 

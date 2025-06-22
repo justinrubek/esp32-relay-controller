@@ -30,6 +30,7 @@ embedded-svc = { version = "0.28", features = ["experimental"] }
 esp-idf-svc = { version = "0.51", features = ["alloc", "experimental"] }
 esp-idf-sys = { version = "0.36.1", features = ["binstart"] }
 esp-idf-hal = { version = "0.45" }
+serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["rt", "net", "io-util", "macros"] }

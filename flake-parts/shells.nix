@@ -7,9 +7,8 @@
     self',
     ...
   }: let
-    inherit (self'.packages) treefmt;
+    inherit (self'.packages) rust-toolchain treefmt;
     inherit (self'.legacyPackages) cargoExtraPackages;
-    rust-toolchain = inputs'.esp-flake.packages.rust-xtensa;
 
     devTools = [
       pkgs.bacon

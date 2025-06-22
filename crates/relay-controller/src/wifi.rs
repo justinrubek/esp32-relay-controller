@@ -17,12 +17,14 @@ use std::{net::Ipv4Addr, str::FromStr, sync::Arc, time::Duration};
 
 use tokio::{sync::RwLock, time::sleep};
 
+#[allow(dead_code)]
 pub struct WifiState {
     pub mac_address: String,
     pub ssid: String,
     ip_addr: RwLock<Option<Ipv4Addr>>,
 }
 
+#[allow(dead_code)]
 impl WifiState {
     pub async fn ip_addr(&self) -> Option<Ipv4Addr> {
         *self.ip_addr.read().await

@@ -1348,6 +1348,7 @@ dependencies = [
  "esp-idf-sys",
  "heapless",
  "log",
+ "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
