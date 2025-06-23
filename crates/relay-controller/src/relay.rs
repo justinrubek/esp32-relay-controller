@@ -11,97 +11,74 @@ use std::sync::{
 
 type Driver = PinDriver<'static, AnyIOPin, Output>;
 
-/// Controls relay states through GPIO pins
+fn pin_driver(pin: AnyIOPin) -> Result<Arc<Mutex<Option<Driver>>>, EspError> {
+    let mut driver = PinDriver::output(pin)?;
+    driver.set_low()?;
+    Ok(Arc::new(Mutex::new(Some(driver))))
+}
+
 pub struct RelayController {
-    relay0: Arc<Mutex<Option<Driver>>>,
-    relay1: Arc<Mutex<Option<Driver>>>,
-    states: Arc<[AtomicBool; 2]>,
+    relays: Vec<Arc<Mutex<Option<Driver>>>>,
+    states: Arc<Vec<AtomicBool>>,
 }
 
 impl RelayController {
     /// Creates a new relay controller with the specified pins
-    pub fn new(pin0: AnyIOPin, pin1: AnyIOPin) -> Result<Self, EspError> {
-        // Create pin drivers
-        let mut relay0 = PinDriver::output(pin0)?;
-        let mut relay1 = PinDriver::output(pin1)?;
+    pub fn new(pins: Vec<AnyIOPin>) -> Result<Self, EspError> {
+        let mut relays = Vec::with_capacity(pins.len());
+        let mut states = Vec::with_capacity(pins.len());
 
-        // Initialize as off
-        relay0.set_low()?;
-        relay1.set_low()?;
-
-        // To make them 'static, we need to leak them
-        let relay0: Driver = unsafe { std::mem::transmute(relay0) };
-        let relay1: Driver = unsafe { std::mem::transmute(relay1) };
+        for pin in pins {
+            relays.push(pin_driver(pin)?);
+            states.push(AtomicBool::new(false));
+        }
 
         let controller = Self {
-            relay0: Arc::new(Mutex::new(Some(relay0))),
-            relay1: Arc::new(Mutex::new(Some(relay1))),
-            states: Arc::new([AtomicBool::new(false), AtomicBool::new(false)]),
+            relays,
+            states: Arc::new(states),
         };
 
-        info!("Relay controller initialized with 2 relays");
         Ok(controller)
     }
 
-    /// Get the state of a specific relay
     pub fn get_state(&self, relay_id: usize) -> Option<bool> {
-        if relay_id < 2 {
-            Some(self.states[relay_id].load(Ordering::SeqCst))
-        } else {
-            None
-        }
+        self.states
+            .get(relay_id)
+            .map(|state| state.load(Ordering::SeqCst))
     }
 
-    /// Get states of all relays
     pub fn get_all_states(&self) -> Vec<(usize, bool)> {
-        vec![
-            (0, self.states[0].load(Ordering::SeqCst)),
-            (1, self.states[1].load(Ordering::SeqCst)),
-        ]
+        self.states
+            .iter()
+            .enumerate()
+            .map(|(idx, state)| (idx, state.load(Ordering::SeqCst)))
+            .collect()
     }
 
     pub fn set_state(&self, relay_id: usize, active: bool) -> Option<bool> {
-        if relay_id >= 2 {
-            return None;
-        }
-
-        let previous_state = self.states[relay_id].swap(active, Ordering::SeqCst);
+        let state = self.states.get(relay_id)?;
+        let previous_state = state.swap(active, Ordering::SeqCst);
 
         if previous_state == active {
             return Some(previous_state);
         }
 
-        let result = match relay_id {
-            0 => {
-                let mut guard = self.relay0.lock().ok()?;
-                if let Some(pin) = guard.as_mut() {
-                    if active {
-                        pin.set_high()
-                    } else {
-                        pin.set_low()
-                    }
-                } else {
-                    Ok(())
-                }
+        let relay = self.relays.get(relay_id)?;
+        let mut guard = relay.lock().ok()?;
+
+        let result = if let Some(pin) = guard.as_mut() {
+            if active {
+                pin.set_high()
+            } else {
+                pin.set_low()
             }
-            1 => {
-                let mut guard = self.relay1.lock().ok()?;
-                if let Some(pin) = guard.as_mut() {
-                    if active {
-                        pin.set_high()
-                    } else {
-                        pin.set_low()
-                    }
-                } else {
-                    Ok(())
-                }
-            }
-            _ => unreachable!(),
+        } else {
+            Ok(())
         };
 
         if let Err(e) = result {
             debug!("Failed to set relay {} state: {:?}", relay_id, e);
-            self.states[relay_id].store(previous_state, Ordering::SeqCst);
+            state.store(previous_state, Ordering::SeqCst);
             return None;
         }
 
@@ -122,8 +99,7 @@ impl RelayController {
 impl Clone for RelayController {
     fn clone(&self) -> Self {
         Self {
-            relay0: Arc::clone(&self.relay0),
-            relay1: Arc::clone(&self.relay1),
+            relays: self.relays.clone(),
             states: Arc::clone(&self.states),
         }
     }

@@ -60,10 +60,10 @@ async fn async_main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let peripherals = Peripherals::take()?;
     let nvs_default_partition = nvs::EspDefaultNvsPartition::take()?;
 
-    let relay_controller = RelayController::new(
+    let relay_controller = RelayController::new(vec![
         peripherals.pins.gpio12.into(),
         peripherals.pins.gpio13.into(),
-    )?;
+    ])?;
     let relay_controller = Arc::new(relay_controller);
 
     // initialize network before starting the server
