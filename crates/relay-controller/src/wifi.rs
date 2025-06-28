@@ -47,10 +47,15 @@ impl<'a> WifiConnection<'a> {
     ) -> Result<Self> {
         info!("initializing wifi driver");
 
-        let dhcp_settings = match config.hostname {
+        let dhcp_settings = match &config.hostname {
             Some(name) => ipv4::DHCPClientSettings {
-                hostname: Some(name.try_into().map_err(|_| Error::HostnameTooLong)?),
+                hostname: Some(
+                    name.as_str()
+                        .try_into()
+                        .map_err(|_| Error::HostnameTooLong)?,
+                ),
             },
+
             _ => DHCPClientSettings::default(),
         };
 
@@ -78,8 +83,8 @@ impl<'a> WifiConnection<'a> {
 
         info!("setting credentials");
         let client_config = ClientConfiguration {
-            ssid: heapless::String::from_str(config.wifi_ssid).map_err(|_| Error::SsidTooLong)?,
-            password: heapless::String::from_str(config.wifi_pass)
+            ssid: heapless::String::from_str(&config.wifi_ssid).map_err(|_| Error::SsidTooLong)?,
+            password: heapless::String::from_str(&config.wifi_pass)
                 .map_err(|_| Error::PasswordTooLong)?,
             ..Default::default()
         };

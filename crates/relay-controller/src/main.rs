@@ -1,10 +1,9 @@
-use std::sync::Arc;
-
 use crate::{config::Config, error::Result, relay::RelayController};
 use esp_idf_hal::prelude::Peripherals;
 use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs, timer::EspTaskTimerService};
 use log::{error, info};
 use server::run_server;
+use std::sync::Arc;
 use wifi::WifiConnection;
 
 mod config;
@@ -53,12 +52,12 @@ fn runtime() -> Result<()> {
 }
 
 async fn async_main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let config = Config::load()?;
-
     let event_loop = EspSystemEventLoop::take()?;
     let timer = EspTaskTimerService::new()?;
     let peripherals = Peripherals::take()?;
     let nvs_default_partition = nvs::EspDefaultNvsPartition::take()?;
+
+    let config = Config::load(nvs_default_partition.clone())?;
 
     let relay_controller = RelayController::new(vec![
         peripherals.pins.gpio12.into(),
@@ -71,7 +70,7 @@ async fn async_main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         peripherals.modem,
         event_loop,
         timer,
-        Some(nvs_default_partition),
+        Some(nvs_default_partition.clone()),
         &config,
     )
     .await?;
