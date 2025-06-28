@@ -1,0 +1,20 @@
+[dependencies]
+aes = "0.8.4"
+crc = "3.3.0"
+heapless = "0.8.0"
+rand = "0.9.1"
+thiserror = { workspace = true }
+xts-mode = "0.5.1"
+zerocopy = "0.6"
+
+[lints]
+workspace = true
+
+[package]
+name = "nvs-writer"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+authors = { workspace = true }
