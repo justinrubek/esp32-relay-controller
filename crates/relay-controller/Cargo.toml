@@ -24,6 +24,7 @@ experimental = ["esp-idf-svc/experimental"]
 
 [dependencies]
 axum = { version = "0.8", features = ["http1", "json"] }
+futures = { workspace = true }
 log = "0.4"
 heapless = "0.8.0"
 embedded-svc = { version = "0.28", features = ["experimental"] }
@@ -32,8 +33,10 @@ esp-idf-sys = { version = "0.36.1", features = ["binstart"] }
 esp-idf-hal = { version = "0.45" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+stowage-proto = { path = "../proto" }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["rt", "net", "io-util", "macros"] }
+tokio-util = { version = "0.7", features = ["full"] }
 
 # --- Optional Embassy Integration ---
 # esp-idf-svc = { version = "0.51", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }

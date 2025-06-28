@@ -2,12 +2,14 @@ use crate::{config::Config, error::Result, relay::RelayController};
 use esp_idf_hal::prelude::Peripherals;
 use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs, timer::EspTaskTimerService};
 use log::{error, info};
+use plan9::Plan9Connection;
 use server::run_server;
 use std::sync::Arc;
 use wifi::WifiConnection;
 
 mod config;
 mod error;
+mod plan9;
 mod relay;
 mod server;
 mod wifi;
@@ -69,15 +71,19 @@ async fn async_main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut wifi_connection = WifiConnection::new(
         peripherals.modem,
         event_loop,
-        timer,
+        timer.clone(),
         Some(nvs_default_partition.clone()),
         &config,
     )
     .await?;
 
+    let mut plan9_connection =
+        Plan9Connection::new("nas:4501".into(), "/esp32/version".into(), timer).await?;
+
     tokio::try_join!(
         run_server(wifi_connection.state.clone(), relay_controller),
-        wifi_connection.connect()
+        wifi_connection.connect(),
+        plan9_connection.run(),
     )?;
 
     Ok(())
