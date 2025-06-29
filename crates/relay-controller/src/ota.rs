@@ -1,5 +1,9 @@
 use crate::error::{Error, Result};
-use esp_idf_svc::timer::{EspTimerService, Task};
+use embedded_svc::ota::OtaUpdate;
+use esp_idf_svc::{
+    ota::{EspOta, EspOtaUpdate, SlotState},
+    timer::{EspTimerService, Task},
+};
 use futures::{SinkExt, StreamExt};
 use log::info;
 use std::time::Duration;
@@ -13,37 +17,74 @@ use tokio_util::codec::{Decoder, Framed};
 
 type Connection = Framed<TcpStream, MessageCodec>;
 
-pub struct Plan9Connection {
+pub struct OtaHandler {
     addr: String,
     path: String,
     timer: EspTimerService<Task>,
 }
 
-impl Plan9Connection {
+impl OtaHandler {
     pub async fn new(addr: String, path: String, timer: EspTimerService<Task>) -> Result<Self> {
-        Ok(Plan9Connection { addr, path, timer })
+        Ok(Self { addr, path, timer })
     }
 
     pub async fn run(&mut self) -> Result<()> {
         let mut timer = self.timer.timer_async()?;
 
-        timer.after(Duration::from_secs(30)).await?;
-
+        let mut ota = EspOta::new()?;
         loop {
-            timer.after(Duration::from_secs(3)).await?;
+            timer.after(Duration::from_secs(30)).await?;
 
-            let stream = TcpStream::connect(&self.addr).await?;
-            let mut conn = Framed::new(stream, MessageCodec::new());
-            let tag: u16 = 1;
-            let msize = perform_handshake(&mut conn, tag).await?;
-
-            let tag: u16 = 1;
-            cat_command(&mut conn, tag, &self.path, msize).await;
+            if self.check_update(&mut ota).await? {
+                self.perform_update(&mut ota).await?;
+            }
         }
+    }
+
+    pub async fn check_update(&mut self, ota: &mut EspOta) -> Result<bool> {
+        let stream = TcpStream::connect(&self.addr).await?;
+        let mut conn = Framed::new(stream, MessageCodec::new());
+        let tag: u16 = 1;
+        let msize = perform_handshake(&mut conn, tag).await?;
+
+        let tag: u16 = 1;
+        let spec_version = cat_command(&mut conn, tag, &self.path, msize).await?;
+        spec_version.trim();
+
+        let current_version = get_running_version(&ota)?;
+
+        info!("should be running version {spec_version}, currently {current_version}");
+
+        Ok(false)
+    }
+
+    pub async fn perform_update(&mut self, ota: &mut EspOta) -> Result<bool> {
+        let mut update = ota.initiate_update()?;
+
+        match self.download_update(&mut update).await {
+            Ok(_) => {}
+            Err(err) => {
+                update.abort()?;
+            }
+        }
+
+        todo!()
+    }
+
+    pub async fn download_update(&mut self, update: &mut EspOtaUpdate<'_>) -> Result<bool> {
+        todo!()
     }
 }
 
-async fn cat_command(conn: &mut Connection, tag: u16, path: &str, msize: u32) -> Result<()> {
+fn get_running_version(ota: &EspOta) -> Result<heapless::String<24>> {
+    Ok(ota
+        .get_running_slot()?
+        .firmware
+        .ok_or(Error::FirmwareInfoMissing)?
+        .version)
+}
+
+async fn cat_command(conn: &mut Connection, tag: u16, path: &str, msize: u32) -> Result<String> {
     info!("running: cat {path}");
 
     let mut root_fid = 2;
@@ -86,11 +127,11 @@ async fn cat_command(conn: &mut Connection, tag: u16, path: &str, msize: u32) ->
         _ => return Err(Error::Other("unexpected response to Topen".into())),
     }
 
-    read_and_output_file(conn, tag, root_fid, msize).await?;
+    let res = read_file(conn, tag, root_fid, msize).await?;
 
     cleanup_fid(conn, tag, root_fid).await?;
 
-    Ok(())
+    Ok(res)
 }
 
 fn parse_path_components(path: &str) -> Vec<String> {
@@ -100,7 +141,7 @@ fn parse_path_components(path: &str) -> Vec<String> {
         .collect()
 }
 
-async fn read_and_output_file(conn: &mut Connection, tag: u16, fid: u32, msize: u32) -> Result<()> {
+async fn read_file(conn: &mut Connection, tag: u16, fid: u32, msize: u32) -> Result<String> {
     let protocol_overhead = 100;
     let max_count = if msize > protocol_overhead {
         msize - protocol_overhead
@@ -109,6 +150,7 @@ async fn read_and_output_file(conn: &mut Connection, tag: u16, fid: u32, msize: 
     };
 
     let mut offset: u64 = 0;
+    let mut file_content = String::new();
 
     loop {
         let tread = TaggedMessage::new(
@@ -129,7 +171,7 @@ async fn read_and_output_file(conn: &mut Connection, tag: u16, fid: u32, msize: 
                     break; // end of file
                 }
 
-                print!("{}", String::from_utf8_lossy(&rread.data));
+                file_content.push_str(&String::from_utf8_lossy(&rread.data));
                 offset += rread.data.len() as u64;
             }
             Message::Rerror(err) => {
@@ -139,7 +181,7 @@ async fn read_and_output_file(conn: &mut Connection, tag: u16, fid: u32, msize: 
         }
     }
 
-    Ok(())
+    Ok(file_content)
 }
 
 async fn cleanup_fid(conn: &mut Connection, tag: u16, fid: u32) -> Result<()> {

@@ -2,6 +2,8 @@
 pub enum Error {
     #[error(transparent)]
     Esp(#[from] esp_idf_svc::sys::EspError),
+    #[error("missing firmware info for running slot")]
+    FirmwareInfoMissing,
     #[error("hostname is too long")]
     HostnameTooLong,
     #[error("missing required configuration: {0}")]
