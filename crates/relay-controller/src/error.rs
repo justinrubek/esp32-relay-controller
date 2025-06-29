@@ -2,6 +2,8 @@
 pub enum Error {
     #[error(transparent)]
     Esp(#[from] esp_idf_svc::sys::EspError),
+    #[error("missing firmware info for running slot")]
+    FirmwareInfoMissing,
     #[error("hostname is too long")]
     HostnameTooLong,
     #[error("missing required configuration: {0}")]
@@ -14,6 +16,10 @@ pub enum Error {
     StowageProto(#[from] stowage_proto::error::Error),
     #[error("wifi password is too long")]
     PasswordTooLong,
+    #[error("the upstream version can't be compared to the current firmware's")]
+    UpstreamVersionInvalid,
+    #[error("error writing esp update")]
+    EspUpdateError,
     #[error("{0}")]
     Other(String),
 }

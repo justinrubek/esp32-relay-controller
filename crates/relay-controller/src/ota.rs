@@ -1,8 +1,13 @@
 use crate::error::{Error, Result};
-use esp_idf_svc::timer::{EspTimerService, Task};
+use embedded_svc::ota::OtaUpdate;
+use esp_idf_hal::io::Write;
+use esp_idf_svc::{
+    ota::{EspOta, EspOtaUpdate, SlotState},
+    timer::{EspTimerService, Task},
+};
 use futures::{SinkExt, StreamExt};
 use log::info;
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 use stowage_proto::{
     consts::P9_NOFID, Decodable, FileMode, Message, MessageCodec, OpenMode, QidType, Stat,
     TaggedMessage, Tattach, Tauth, Tclunk, Tcreate, Topen, Tread, Tstat, Tversion, Twalk, Twrite,
@@ -13,59 +18,131 @@ use tokio_util::codec::{Decoder, Framed};
 
 type Connection = Framed<TcpStream, MessageCodec>;
 
-pub struct Plan9Connection {
+// OTA update handler over 9p protocol
+pub struct OtaHandler {
     addr: String,
     path: String,
     timer: EspTimerService<Task>,
 }
 
-impl Plan9Connection {
+impl OtaHandler {
     pub async fn new(addr: String, path: String, timer: EspTimerService<Task>) -> Result<Self> {
-        Ok(Plan9Connection { addr, path, timer })
+        Ok(Self { addr, path, timer })
     }
 
+    /// Launches a new task that continually checks for firmware updates.
+    /// Only returns in case of an error.
+    /// # Errors
+    /// - IO failure
     pub async fn run(&mut self) -> Result<()> {
         let mut timer = self.timer.timer_async()?;
 
-        timer.after(Duration::from_secs(30)).await?;
-
+        let mut ota = EspOta::new()?;
         loop {
-            timer.after(Duration::from_secs(3)).await?;
+            timer.after(Duration::from_secs(16)).await?;
 
-            let stream = TcpStream::connect(&self.addr).await?;
-            let mut conn = Framed::new(stream, MessageCodec::new());
-            let tag: u16 = 1;
-            let msize = perform_handshake(&mut conn, tag).await?;
-
-            let tag: u16 = 1;
-            cat_command(&mut conn, tag, &self.path, msize).await;
+            match self.check_update(&mut ota).await {
+                Ok(Some(version)) => self.perform_update(&mut ota, &version).await?,
+                Ok(None) => {
+                    info!("firmware already up to date");
+                    false
+                }
+                Err(e) => {
+                    info!("update check failed: {e:?}");
+                    false
+                }
+            };
         }
+    }
+
+    pub async fn check_update(&mut self, ota: &mut EspOta) -> Result<Option<String>> {
+        let mut version_buf = Vec::new();
+        let upstream_version = cat_file(
+            &self.addr,
+            &format!("{}/version", self.path),
+            &mut version_buf,
+        )
+        .await?;
+        let upstream_version = String::from_utf8_lossy(&version_buf);
+        let upstream_version = upstream_version.trim();
+
+        let current_version = get_running_version(&ota)?;
+        let current_version = current_version.to_string();
+
+        match current_version.eq(upstream_version) {
+            true => Ok(None),
+            false => {
+                info!("update {current_version} -> {upstream_version}");
+                Ok(Some(upstream_version.to_string()))
+            }
+        }
+    }
+
+    pub async fn perform_update(&mut self, ota: &mut EspOta, version: &str) -> Result<bool> {
+        info!("initiating update");
+        let mut update = ota.initiate_update()?;
+
+        match self.download_update(&mut update, version).await {
+            Ok(_) => {
+                info!("update complete, rebooting");
+                update.complete()?;
+                esp_idf_svc::hal::reset::restart();
+                Ok(true)
+            }
+            Err(err) => {
+                info!("update aborted: {err:?}");
+                update.abort()?;
+                Ok(false)
+            }
+        }
+    }
+
+    pub async fn download_update(
+        &mut self,
+        update: &mut EspOtaUpdate<'_>,
+        version: &str,
+    ) -> Result<bool> {
+        let firmware_path = format!("{}/files/{}", self.path, version);
+        info!("downloading {firmware_path}");
+        cat_file(&self.addr, &firmware_path, update).await?;
+        Ok(true)
     }
 }
 
-async fn cat_command(conn: &mut Connection, tag: u16, path: &str, msize: u32) -> Result<()> {
-    info!("running: cat {path}");
+fn get_running_version(ota: &EspOta) -> Result<heapless::String<24>> {
+    Ok(ota
+        .get_running_slot()?
+        .firmware
+        .ok_or(Error::FirmwareInfoMissing)?
+        .version)
+}
+
+async fn cat_file<W: Write>(addr: &str, path: &str, writer: &mut W) -> Result<()> {
+    let stream = TcpStream::connect(addr).await?;
+    let mut conn = Framed::new(stream, MessageCodec::new());
+    let tag: u16 = 1;
+    let msize = perform_handshake(&mut conn, tag).await?;
 
     let mut root_fid = 2;
     let components = parse_path_components(&path);
 
     if components.is_empty() {
-        return Err(Error::Other(format!("cat: {path}: Is a directory")));
+        return Err(Error::Other(format!("cat: {}: Is a directory", path)));
     }
 
-    let walk_success = walk_to_path(conn, tag, root_fid, root_fid + 1, &path).await?;
+    let walk_success = walk_to_path(&mut conn, tag, root_fid, root_fid + 1, &path).await?;
     if !walk_success {
-        return Err(Error::Other(format!("file not found: {path}")));
+        return Err(Error::Other(format!("file not found: {}", path)));
     }
     root_fid += 1;
 
-    // open file for reading
+    // Open file for reading
     let open_msg = Topen {
         fid: root_fid,
         mode: OpenMode::Read.into(),
     };
     send_message(
-        conn,
+        &mut conn,
         TaggedMessage {
             message: Message::Topen(open_msg),
             tag,
@@ -73,11 +150,11 @@ async fn cat_command(conn: &mut Connection, tag: u16, path: &str, msize: u32) ->
     )
     .await?;
 
-    let response = receive_message(conn).await?;
+    let response = receive_message(&mut conn).await?;
     match response.message {
         Message::Ropen(ropen) => {
             if ropen.qid.qtype.contains(QidType::Dir) {
-                return Err(Error::Other(format!("cat: {path}: Is a directory")));
+                return Err(Error::Other(format!("cat: {}: Is a directory", path)));
             }
         }
         Message::Rerror(err) => {
@@ -86,9 +163,9 @@ async fn cat_command(conn: &mut Connection, tag: u16, path: &str, msize: u32) ->
         _ => return Err(Error::Other("unexpected response to Topen".into())),
     }
 
-    read_and_output_file(conn, tag, root_fid, msize).await?;
+    read_file(&mut conn, tag, root_fid, msize, writer).await?;
 
-    cleanup_fid(conn, tag, root_fid).await?;
+    cleanup_fid(&mut conn, tag, root_fid).await?;
 
     Ok(())
 }
@@ -100,7 +177,13 @@ fn parse_path_components(path: &str) -> Vec<String> {
         .collect()
 }
 
-async fn read_and_output_file(conn: &mut Connection, tag: u16, fid: u32, msize: u32) -> Result<()> {
+async fn read_file<W: Write>(
+    conn: &mut Connection,
+    tag: u16,
+    fid: u32,
+    msize: u32,
+    writer: &mut W,
+) -> Result<()> {
     let protocol_overhead = 100;
     let max_count = if msize > protocol_overhead {
         msize - protocol_overhead
@@ -129,8 +212,11 @@ async fn read_and_output_file(conn: &mut Connection, tag: u16, fid: u32, msize: 
                     break; // end of file
                 }
 
-                print!("{}", String::from_utf8_lossy(&rread.data));
-                offset += rread.data.len() as u64;
+                let l = rread.data.len() as u64;
+                writer
+                    .write_all(&rread.data)
+                    .map_err(|_| Error::EspUpdateError)?;
+                offset += l;
             }
             Message::Rerror(err) => {
                 return Err(Error::Other(format!("Failed to read file: {}", err.ename)));
