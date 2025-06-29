@@ -16,6 +16,8 @@ pub enum Error {
     StowageProto(#[from] stowage_proto::error::Error),
     #[error("wifi password is too long")]
     PasswordTooLong,
+    #[error("the upstream version can't be compared to the current firmware's")]
+    UpstreamVersionInvalid,
     #[error("{0}")]
     Other(String),
 }

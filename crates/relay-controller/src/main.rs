@@ -79,8 +79,12 @@ async fn async_main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    let mut ota_handler =
-        OtaHandler::new("nas:4501".into(), "/esp32/version".into(), timer.clone()).await?;
+    let mut ota_handler = OtaHandler::new(
+        "nas:4501".into(),
+        "/esp32/relay-controller".into(),
+        timer.clone(),
+    )
+    .await?;
 
     tokio::try_join!(
         run_server(wifi_connection.state.clone(), relay_controller),
