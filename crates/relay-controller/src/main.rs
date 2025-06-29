@@ -1,14 +1,16 @@
-use crate::{config::Config, error::Result, relay::RelayController};
+use crate::{
+    config::Config, error::Result, ota::OtaHandler, relay::RelayController, server::run_server,
+};
 use esp_idf_hal::prelude::Peripherals;
 use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs, timer::EspTaskTimerService};
 use log::{error, info};
 use plan9::Plan9Connection;
-use server::run_server;
 use std::sync::Arc;
 use wifi::WifiConnection;
 
 mod config;
 mod error;
+mod ota;
 mod plan9;
 mod relay;
 mod server;
@@ -46,7 +48,7 @@ fn runtime() -> Result<()> {
 
     match rt.block_on(async { async_main().await }) {
         Ok(()) => info!("main() finished"),
-        Err(_) => error!("main() failed"),
+        Err(e) => error!("main() failed: {e:?}"),
     }
 
     info!("rebooting");
@@ -59,6 +61,7 @@ async fn async_main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let peripherals = Peripherals::take()?;
     let nvs_default_partition = nvs::EspDefaultNvsPartition::take()?;
 
+    info!("loading configuration from nvs");
     let config = Config::load(nvs_default_partition.clone())?;
 
     let relay_controller = RelayController::new(vec![
@@ -67,6 +70,7 @@ async fn async_main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     ])?;
     let relay_controller = Arc::new(relay_controller);
 
+    info!("iniializing networking");
     // initialize network before starting the server
     let mut wifi_connection = WifiConnection::new(
         peripherals.modem,
@@ -77,13 +81,17 @@ async fn async_main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    let mut plan9_connection =
-        Plan9Connection::new("nas:4501".into(), "/esp32/version".into(), timer).await?;
+    let mut ota_handler = OtaHandler::new(
+        "nas:4501".into(),
+        "/esp32/relay-controller".into(),
+        timer.clone(),
+    )
+    .await?;
 
     tokio::try_join!(
         run_server(wifi_connection.state.clone(), relay_controller),
         wifi_connection.connect(),
-        plan9_connection.run(),
+        ota_handler.run(),
     )?;
 
     Ok(())
