@@ -12,4 +12,12 @@
 
 3. Write the firmware
 
-`cd crates/relay-controller && cargo espflash flash --monitor --partition-table partitions.csv`
+`cd crates/relay-controller && cargo espflash flash --monitor --partition-table partitions.csv --chip esp32s3 -s 8mb --target-app-partition ota_0`
+
+4. Export the firmware
+
+`cargo espflash save-image --chip esp32s3 ~/n/nas/esp32/relay-controller/files/$(git rev-parse --short HEAD) --partition-table partitions.csv -s 8mb`
+
+5. Update the running version
+
+`git rev-parse --short HEAD > ~/n/nas/esp32/relay-controller/version`
